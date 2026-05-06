@@ -125,6 +125,12 @@ shader DiffractionGrating
         int min = 1,
         int max = 12
         ]],
+    int diffraction_interference = 0
+        [[
+        string label = "Enable Interference",
+        string page = "Diffraction",
+        string widget = "checkBox"
+        ]],
     float diffraction_extra_roughness = 0.2
         [[
         string label = "Extra Roughness",
@@ -222,6 +228,8 @@ shader DiffractionGrating
     float cr = pow(coat_roughness, 2);
     float dr = pow(clamp(microfacet_roughness + diffraction_extra_roughness, 0, 1), 2);
     float base_roughness = mix(mr, pow(min(1, pow(mr,4) + 2*pow(cr, 4)), 0.25), coat_weight);
+    float real_sum = 0;
+    float imag_sum = 0;
 
     vector roughness = vector(base_roughness, dr, 0);
 
@@ -230,11 +238,13 @@ shader DiffractionGrating
         normal Nw = Normal;
         float w = wavelength_stratified(300, 800, m, 5);
         float intensity = 1.0;
+        float interference = 1.0;
         
         // Calculate diffraction
         if(m != 0){
             float sine = normal_sine(Normal);
-            float sine_offset = sine + m * w / Distance;
+            float factor = m * w / Distance;
+            float sine_offset = sine + factor;
 
             // No real solution, continue to next order
             if(abs(sine_offset) > 1) continue;
@@ -244,9 +254,19 @@ shader DiffractionGrating
             // Reduce intensity of higher orders based on width of slits and falloff
             intensity = select(1.0, pow(sin(beta)/beta, 2), beta) * pow(1 - diffraction_falloff, (abs(m) - 1));
 
-            metal += (intensity * Ct) * microfacet("ggx", Nw, roughness.y * pow(1 - diffraction_roughness_falloff, (abs(m) - 1)), 0, 0);
-            refl += (intensity * Ct) * microfacet("ggx", Nw, roughness.y * pow(1 - diffraction_roughness_falloff, (abs(m) - 1)), base_ior, 0);
-            refr += (intensity * Ct) * microfacet("beckmann", Nw, roughness.y * pow(1 - diffraction_roughness_falloff, (abs(m) - 1)), base_ior, 1);
+            if (diffraction_interference == 1 && diffraction_orders > 1){
+                float phi = 2.0 * M_PI * factor;
+                float real;
+                float imag;
+                sincos(phi, imag, real);
+                real_sum += real;
+                imag_sum += imag;
+                interference = sqrt(real_sum * real_sum + imag_sum * imag_sum);
+            }
+
+            metal += (interference * intensity * Ct) * microfacet("ggx", Nw, roughness.y * pow(1 - diffraction_roughness_falloff, (abs(m) - 1)), 0, 0);
+            refl += (interference * intensity * Ct) * microfacet("ggx", Nw, roughness.y * pow(1 - diffraction_roughness_falloff, (abs(m) - 1)), base_ior, 0);
+            refr += (interference * intensity * Ct) * microfacet("beckmann", Nw, roughness.y * pow(1 - diffraction_roughness_falloff, (abs(m) - 1)), base_ior, 1);
         }
         else{
             float alpha_x = mix(2 * roughness.x, 0, 0.5 * (clamp(microfacet_anisotropy, epsilon - 1, 1 - epsilon) + 1));
